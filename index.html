@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FIT//DRAW v1.0</title>
+<style>
+  /* ========== 基础主题：纯黑底 + 荧光绿 ========== */
+  :root{
+    --g:#00ff41;            /* 主荧光绿 */
+    --g-dim:#00a82b;        /* 暗一档的绿，用于边框/次要信息 */
+    --g-dark:#003b12;       /* 更暗，用于底纹 */
+    --warn:#ffb000;         /* 警告琥珀色 */
+    --err:#ff3b3b;          /* 错误红 */
+    --bg:#000;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--g);
+    font-family:Consolas,"Courier New",Monaco,monospace;
+    font-size:14px;
+    line-height:1.6;
+    overflow-x:hidden;
+  }
+  /* 全局文字发光 */
+  body,button{text-shadow:0 0 6px rgba(0,255,65,.45);}
+
+  /* ========== CRT 扫描线 + 暗角覆盖层 ========== */
+  .crt-overlay{
+    position:fixed; inset:0; pointer-events:none; z-index:99;
+    background:
+      repeating-linear-gradient(to bottom,
+        rgba(0,0,0,.22) 0px,
+        rgba(0,0,0,.22) 1px,
+        transparent 1px,
+        transparent 3px);
+  }
+  .crt-overlay::after{
+    content:"";
+    position:absolute; inset:0;
+    background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.65) 100%);
+  }
+  /* 整体轻微抖动，营造老显示器感 */
+  @keyframes flicker{
+    0%,100%{opacity:1}
+    96%{opacity:1}
+    97%{opacity:.92}
+    98%{opacity:1}
+  }
+  .crt{animation:flicker 6s infinite;}
+
+  /* ========== 开机黑屏 ========== */
+  #boot{
+    position:fixed; inset:0; z-index:200;
+    background:#000;
+    padding:32px;
+    font-size:14px;
+    white-space:pre-wrap;
+    overflow:hidden;
+    transition:opacity .35s;
+  }
+  #boot.hide{opacity:0; pointer-events:none;}
+  #boot .line{margin-bottom:2px;}
+  #boot .skip{
+    position:absolute; right:24px; bottom:20px;
+    font-size:12px; color:var(--g-dim); opacity:.7;
+  }
+
+  /* ========== 终端窗口 ========== */
+  .crt{
+    min-height:100vh;
+    display:flex; align-items:center; justify-content:center;
+    padding:18px;
+  }
+  .win{
+    width:100%; max-width:1120px;
+    border:1px solid var(--g-dim);
+    background:linear-gradient(180deg, rgba(0,255,65,.04), rgba(0,0,0,.6) 140px);
+    box-shadow:0 0 26px rgba(0,255,65,.13), inset 0 0 60px rgba(0,255,65,.045);
+  }
+  header.bar{
+    display:flex; justify-content:space-between; align-items:center;
+    gap:12px;
+    padding:8px 14px;
+    border-bottom:1px solid var(--g-dim);
+    font-size:13px; letter-spacing:.5px;
+    background:rgba(0,255,65,.06);
+  }
+  header.bar .sig{color:var(--g);}
+  header.bar .sig b{animation:blinkSig 1.6s infinite;}
+  @keyframes blinkSig{50%{opacity:.35}}
+
+  .main{
+    display:grid;
+    grid-template-columns:1fr 320px;
+    min-height:480px;
+  }
+
+  /* ========== 左侧输出屏 ========== */
+  .screen{
+    padding:14px 16px;
+    height:58vh; min-height:420px;
+    overflow-y:auto;
+    overflow-x:hidden;
+    font-size:14px;
+    scrollbar-width:thin;
+    scrollbar-color:var(--g-dark) transparent;
+  }
+  .screen::-webkit-scrollbar{width:8px}
+  .screen::-webkit-scrollbar-thumb{background:var(--g-dark)}
+  .line{white-space:pre-wrap; word-break:break-word; margin:2px 0;}
+  .line.dim{color:var(--g-dim); text-shadow:none;}
+  .line.ok{color:var(--g);}
+  .line.warn{color:var(--warn); text-shadow:0 0 6px rgba(255,176,0,.4);}
+  .line.err{color:var(--err); text-shadow:0 0 6px rgba(255,59,59,.4);}
+  .line.cmd{color:var(--g); opacity:.85;}
+  .line.locked{
+    color:#c8ffd4;
+    border-left:2px solid var(--g);
+    padding-left:8px;
+    background:rgba(0,255,65,.08);
+    box-shadow:0 0 14px rgba(0,255,65,.18) inset;
+  }
+  .line.locked .meta{color:var(--g-dim); text-shadow:none;}
+  .line .brk{color:var(--g); font-weight:bold;}
+  /* 锁定瞬间的高亮闪烁 */
+  @keyframes lockFlash{
+    0%{background:rgba(0,255,65,.55); color:#000}
+    100%{background:rgba(0,255,65,.08); color:#c8ffd4}
+  }
+  .line.flash{animation:lockFlash .5s ease-out;}
+  .line.scan{color:var(--g-dim);}
+
+  /* ========== 右侧控制面板 ========== */
+  .panel{
+    border-left:1px solid var(--g-dark);
+    padding:14px;
+    display:flex; flex-direction:column; gap:14px;
+    background:rgba(0,255,65,.02);
+  }
+  .block{border:1px solid var(--g-dark); padding:10px;}
+  .block-title{
+    font-size:11px; color:var(--g-dim); letter-spacing:1px;
+    margin:0 0 8px; text-shadow:none;
+  }
+  .block-title::before{content:"// ";}
+
+  /* 通用按钮 */
+  button{
+    font-family:inherit; font-size:13px;
+    color:var(--g);
+    background:transparent;
+    border:1px solid var(--g-dim);
+    padding:6px 10px;
+    cursor:pointer;
+    transition:background .12s, color .12s, box-shadow .12s;
+  }
+  button:hover:not(:disabled){
+    background:rgba(0,255,65,.16);
+    box-shadow:0 0 10px rgba(0,255,65,.25);
+  }
+  button:active:not(:disabled){background:var(--g); color:#000; text-shadow:none;}
+  button:disabled{opacity:.35; cursor:not-allowed;}
+  button.active{background:rgba(0,255,65,.28); color:#d8ffe0;}
+
+  /* 肌群 chips */
+  .chips{display:flex; flex-wrap:wrap; gap:6px;}
+  .chips button{padding:5px 9px; font-size:12px;}
+
+  /* 抽签数量 */
+  .counts{display:flex; gap:6px; margin-bottom:10px;}
+  .counts button{flex:1; padding:6px 0;}
+  .draw-btn{
+    width:100%; padding:10px 0; font-size:14px;
+    letter-spacing:2px;
+    border-color:var(--g);
+    background:rgba(0,255,65,.08);
+  }
+  @keyframes pulseBtn{50%{box-shadow:0 0 16px rgba(0,255,65,.45)}}
+  .draw-btn:not(:disabled){animation:pulseBtn 2.4s infinite;}
+
+  /* 计时器 */
+  .timer{
+    font-size:13px; letter-spacing:1px;
+    padding:6px 2px; white-space:nowrap;
+    overflow:hidden;
+  }
+  .timer.alarm{color:var(--err); animation:alarmBlink .5s steps(2) 6;}
+  @keyframes alarmBlink{50%{opacity:.25}}
+  .timer-btns{display:flex; gap:6px; margin-top:8px;}
+  .timer-btns button{flex:1; padding:6px 0; font-size:12px;}
+
+  /* 历史 */
+  .hist-head{display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--g-dim); text-shadow:none;}
+  .hist-list{
+    margin-top:8px; max-height:132px; overflow-y:auto;
+    font-size:12px; color:var(--g-dim); text-shadow:none;
+    border-top:1px dashed var(--g-dark); padding-top:6px;
+    display:none;
+  }
+  .hist-list.show{display:block;}
+  .hist-list .row{display:flex; justify-content:space-between; gap:8px;}
+  .hist-list .row span:first-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+  /* 底部状态栏 */
+  footer.bar{
+    display:flex; justify-content:space-between; gap:12px;
+    padding:6px 14px;
+    border-top:1px solid var(--g-dim);
+    font-size:11px; color:var(--g-dim); text-shadow:none;
+    background:rgba(0,255,65,.05);
+  }
+  footer.bar .status{color:var(--g);}
+  .cursor{display:inline-block; width:8px; height:14px; background:var(--g); vertical-align:-2px; animation:cursorBlink 1s steps(2) infinite;}
+  @keyframes cursorBlink{50%{opacity:0}}
+
+  /* ========== 窄屏适配 ========== */
+  @media (max-width:860px){
+    .main{grid-template-columns:1fr;}
+    .panel{border-left:none; border-top:1px solid var(--g-dark);}
+    .screen{height:46vh; min-height:300px;}
+    footer.bar{flex-direction:column; gap:2px;}
+  }
+</style>
+</head>
+<body>
+
+<!-- 开机黑屏动画（可点击跳过） -->
+<div id="boot" title="点击跳过">
+  <div id="bootLog"></div>
+  <div class="skip">[ CLICK TO SKIP ]</div>
+</div>
+
+<div class="crt">
+  <div class="win">
+    <header class="bar">
+      <span>FIT//DRAW v1.0</span>
+      <span class="sig">[SIGNAL: <b>OK</b>]</span>
+    </header>
+
+    <div class="main">
+      <!-- 左侧：终端输出 -->
+      <section class="screen" id="screen" aria-live="polite"></section>
+
+      <!-- 右侧：全按钮控制面板（无命令行） -->
+      <aside class="panel">
+        <div class="block">
+          <h2 class="block-title">肌群筛选</h2>
+          <div class="chips" id="muscleChips"></div>
+        </div>
+
+        <div class="block">
+          <h2 class="block-title">抽签</h2>
+          <div class="counts" id="countBtns"></div>
+          <button class="draw-btn" id="drawBtn">▶ 执行抽签</button>
+        </div>
+
+        <div class="block">
+          <h2 class="block-title">休息计时器</h2>
+          <div class="timer" id="timerDisplay">[░░░░░░░░░░░░░░░░░░░░░░░░] --</div>
+          <div class="chips" id="timerPresets" style="margin-top:8px"></div>
+          <div class="timer-btns">
+            <button id="timerToggle">暂停</button>
+            <button id="timerReset">归零</button>
+          </div>
+        </div>
+
+        <div class="block">
+          <h2 class="block-title">历史 / 防重复</h2>
+          <div class="hist-head">
+            <span id="histCount">已抽 0 次</span>
+            <span>最近 10 次不重复</span>
+          </div>
+          <div class="chips" style="margin-top:8px">
+            <button id="histToggle">查看记录</button>
+            <button id="histClear">清空</button>
+          </div>
+          <div class="hist-list" id="histList"></div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="bar">
+      <span>提示：所有操作点击右侧按钮完成，无需输入任何命令<span class="cursor"></span></span>
+      <span class="status" id="statusText">READY</span>
+    </footer>
+  </div>
+</div>
+
+<div class="crt-overlay"></div>
+
+<script>
+/* =========================================================
+   1. 动作库（内置 32 个）
+   muscle: 肌群 / equip: 器械 / diff: 难度 1-5
+   sets: 组数 / reps: 次数或秒数 / rest: 建议休息秒数
+   ========================================================= */
+const DB = [
+  // 胸
+  { id:'chest-01', name:'杠铃卧推',       muscle:'胸', equip:'杠铃',     diff:3, sets:4, reps:'8',   rest:90  },
+  { id:'chest-02', name:'哑铃卧推',       muscle:'胸', equip:'哑铃',     diff:3, sets:4, reps:'10',  rest:90  },
+  { id:'chest-03', name:'上斜哑铃卧推',   muscle:'胸', equip:'哑铃',     diff:3, sets:3, reps:'10',  rest:90  },
+  { id:'chest-04', name:'俯卧撑',         muscle:'胸', equip:'徒手',     diff:1, sets:3, reps:'15',  rest:60  },
+  { id:'chest-05', name:'双杠臂屈伸',     muscle:'胸', equip:'徒手',     diff:4, sets:3, reps:'8',   rest:90  },
+  { id:'chest-06', name:'绳索夹胸',       muscle:'胸', equip:'固定器械', diff:2, sets:3, reps:'12',  rest:60  },
+  // 背
+  { id:'back-01',  name:'引体向上',       muscle:'背', equip:'徒手',     diff:4, sets:4, reps:'6',   rest:120 },
+  { id:'back-02',  name:'高位下拉',       muscle:'背', equip:'固定器械', diff:2, sets:4, reps:'10',  rest:90  },
+  { id:'back-03',  name:'杠铃划船',       muscle:'背', equip:'杠铃',     diff:3, sets:4, reps:'8',   rest:90  },
+  { id:'back-04',  name:'单臂哑铃划船',   muscle:'背', equip:'哑铃',     diff:2, sets:3, reps:'10',  rest:75  },
+  { id:'back-05',  name:'坐姿划船',       muscle:'背', equip:'固定器械', diff:2, sets:3, reps:'12',  rest:75  },
+  { id:'back-06',  name:'直臂下压',       muscle:'背', equip:'固定器械', diff:2, sets:3, reps:'12',  rest:60  },
+  // 腿
+  { id:'leg-01',   name:'杠铃深蹲',       muscle:'腿', equip:'杠铃',     diff:4, sets:4, reps:'8',   rest:120 },
+  { id:'leg-02',   name:'腿举',           muscle:'腿', equip:'固定器械', diff:2, sets:4, reps:'10',  rest:90  },
+  { id:'leg-03',   name:'罗马尼亚硬拉',   muscle:'腿', equip:'杠铃',     diff:4, sets:3, reps:'8',   rest:120 },
+  { id:'leg-04',   name:'保加利亚分腿蹲', muscle:'腿', equip:'哑铃',     diff:4, sets:3, reps:'10',  rest:90  },
+  { id:'leg-05',   name:'腿屈伸',         muscle:'腿', equip:'固定器械', diff:2, sets:3, reps:'12',  rest:60  },
+  { id:'leg-06',   name:'站姿提踵',       muscle:'腿', equip:'固定器械', diff:1, sets:4, reps:'15',  rest:45  },
+  // 肩
+  { id:'sho-01',   name:'杠铃推举',       muscle:'肩', equip:'杠铃',     diff:4, sets:4, reps:'8',   rest:120 },
+  { id:'sho-02',   name:'哑铃侧平举',     muscle:'肩', equip:'哑铃',     diff:2, sets:4, reps:'12',  rest:60  },
+  { id:'sho-03',   name:'面拉',           muscle:'肩', equip:'固定器械', diff:2, sets:3, reps:'15',  rest:60  },
+  { id:'sho-04',   name:'反向飞鸟',       muscle:'肩', equip:'哑铃',     diff:2, sets:3, reps:'12',  rest:60  },
+  // 手臂
+  { id:'arm-01',   name:'杠铃弯举',       muscle:'手臂', equip:'杠铃',     diff:2, sets:3, reps:'10',  rest:60 },
+  { id:'arm-02',   name:'锤式弯举',       muscle:'手臂', equip:'哑铃',     diff:2, sets:3, reps:'12',  rest:60 },
+  { id:'arm-03',   name:'绳索下压',       muscle:'手臂', equip:'固定器械', diff:2, sets:3, reps:'12',  rest:60 },
+  { id:'arm-04',   name:'窄距卧推',       muscle:'手臂', equip:'杠铃',     diff:3, sets:3, reps:'10',  rest:90 },
+  { id:'arm-05',   name:'集中弯举',       muscle:'手臂', equip:'哑铃',     diff:1, sets:3, reps:'12',  rest:45 },
+  // 核心
+  { id:'core-01',  name:'平板支撑',       muscle:'核心', equip:'徒手',     diff:2, sets:3, reps:'60s', rest:45 },
+  { id:'core-02',  name:'卷腹',           muscle:'核心', equip:'徒手',     diff:1, sets:3, reps:'20',  rest:45 },
+  { id:'core-03',  name:'悬垂举腿',       muscle:'核心', equip:'徒手',     diff:3, sets:3, reps:'12',  rest:60 },
+  { id:'core-04',  name:'俄罗斯转体',     muscle:'核心', equip:'哑铃',     diff:2, sets:3, reps:'20',  rest:45 },
+  { id:'core-05',  name:'健腹轮',         muscle:'核心', equip:'徒手',     diff:4, sets:3, reps:'10',  rest:60 }
+];
+
+const MUSCLES = ['全部','胸','背','腿','肩','手臂','核心'];
+const RECENT_LIMIT = 10;                 // 最近多少次抽签不重复
+const KEY_HIST = 'fitdraw_history_v1';   // localStorage 键名
+
+/* =========================================================
+   2. 全局状态
+   ========================================================= */
+let currentFilter = '全部';   // 当前肌群筛选
+let drawCount = 1;            // 待抽数量
+let drawing = false;          // 是否正在抽签（防止连点）
+let history = loadHistory();  // 抽签历史（localStorage 持久化）
+
+const screenEl = document.getElementById('screen');
+const statusEl = document.getElementById('statusText');
+const drawBtn = document.getElementById('drawBtn');
+
+/* =========================================================
+   3. 工具函数
+   ========================================================= */
+// 往终端屏追加一行，返回该行元素（便于后续更新）
+function log(html, cls = '') {
+  const el = document.createElement('div');
+  el.className = 'line ' + cls;
+  el.innerHTML = html;
+  screenEl.appendChild(el);
+  screenEl.scrollTop = screenEl.scrollHeight;
+  return el;
+}
+
+// 底部状态栏文字
+function setStatus(t) { statusEl.textContent = t; }
+
+// 读取历史（损坏或不支持 localStorage 时返回空数组）
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(KEY_HIST);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// 保存历史，只保留最近 200 条
+function saveHistory() {
+  history = history.slice(-200);
+  try { localStorage.setItem(KEY_HIST, JSON.stringify(history)); } catch (e) {}
+}
+
+// 把 reps 字段格式化成中文展示
+function fmtReps(reps) {
+  return reps.endsWith('s') ? reps : reps + ' 次';
+}
+
+// 洗牌（Fisher–Yates）
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// 当前筛选下的动作池
+function poolOf(muscle) {
+  return muscle === '全部' ? DB : DB.filter(e => e.muscle === muscle);
+}
+
+/* =========================================================
+   4. 开机序列（纯文本，无声音）
+   ========================================================= */
+const BOOT_LINES = [
+  'FIT//DRAW BIOS v1.0',
+  '[ OK ] mounting exercise_db ......... 32 entries',
+  '[ OK ] loading rng core ............. seed ready',
+  '[ OK ] linking localStorage ......... online',
+  '[ OK ] audio subsystem .............. offline (disabled by user)',
+  '',
+  '> SYSTEM READY.'
+];
+
+const bootEl = document.getElementById('boot');
+const bootLogEl = document.getElementById('bootLog');
+let bootTimer = null;
+
+function runBoot() {
+  let i = 0;
+  bootTimer = setInterval(() => {
+    if (i >= BOOT_LINES.length) {
+      clearInterval(bootTimer);
+      setTimeout(finishBoot, 350);
+      return;
+    }
+    const line = document.createElement('div');
+    line.className = 'line' + (BOOT_LINES[i] === '' ? '' : ' ok');
+    line.textContent = BOOT_LINES[i];
+    bootLogEl.appendChild(line);
+    i++;
+  }, 190);
+}
+
+// 结束开机动画，显示主界面并打印欢迎信息
+function finishBoot() {
+  if (bootTimer) clearInterval(bootTimer);
+  bootEl.classList.add('hide');
+  setTimeout(() => bootEl.remove(), 400);
+
+  log('> FIT//DRAW 已就绪。选择肌群与数量，点击 [执行抽签]。', 'ok');
+  log('> 当前动作库：' + DB.length + ' 个动作 · 6 大肌群 · 无音效模式', 'dim');
+  log('> 历史记录会保存在本机浏览器，最近 ' + RECENT_LIMIT + ' 次抽到的动作不会重复。', 'dim');
+  log('', 'dim');
+}
+
+bootEl.addEventListener('click', finishBoot);
+runBoot();
+
+/* =========================================================
+   5. 控制面板渲染
+   ========================================================= */
+// 肌群筛选按钮
+const chipsEl = document.getElementById('muscleChips');
+MUSCLES.forEach(m => {
+  const b = document.createElement('button');
+  b.textContent = m;
+  b.dataset.muscle = m;
+  if (m === '全部') b.classList.add('active');
+  b.addEventListener('click', () => {
+    if (drawing) return; // 抽签过程中不允许改筛选
+    currentFilter = m;
+    [...chipsEl.children].forEach(x => x.classList.toggle('active', x.dataset.muscle === m));
+    const pool = poolOf(m);
+    log('> 筛选已切换：' + m + '（' + pool.length + ' 个动作）', 'dim');
+  });
+  chipsEl.appendChild(b);
+});
+
+// 抽签数量按钮 1-5
+const countEl = document.getElementById('countBtns');
+for (let n = 1; n <= 5; n++) {
+  const b = document.createElement('button');
+  b.textContent = n;
+  b.dataset.n = n;
+  if (n === 1) b.classList.add('active');
+  b.addEventListener('click', () => {
+    if (drawing) return;
+    drawCount = n;
+    [...countEl.children].forEach(x => x.classList.toggle('active', +x.dataset.n === n));
+  });
+  countEl.appendChild(b);
+}
+
+/* =========================================================
+   6. 抽签核心逻辑
+   ========================================================= */
+// 依据筛选 + 防重复规则，挑选 n 个不重复动作
+function pickExercises(n) {
+  const pool = poolOf(currentFilter);
+  if (pool.length === 0) return [];
+
+  n = Math.min(n, pool.length); // 数量不能超过池子大小
+  const recentIds = new Set(history.slice(-RECENT_LIMIT).map(h => h.id));
+  let candidates = pool.filter(e => !recentIds.has(e.id));
+
+  // 可用动作不够：说明最近抽得太密，清空防重复限制并提示
+  if (candidates.length < n) {
+    if (pool.length >= n) {
+      log('WARNING: POOL EXHAUSTED, RESETTING', 'warn');
+    } else {
+      log('WARNING: 当前肌群动作不足，已全部纳入本次抽签', 'warn');
+    }
+    candidates = pool.slice();
+  }
+
+  return shuffle(candidates).slice(0, n);
+}
+
+// 乱码扫描动画：显示约 0.7 秒高速字符，然后锁定为最终动作
+function scanLine(ex) {
+  return new Promise(resolve => {
+    const el = log('[SCANNING] ', 'scan');
+    const names = DB.map(d => d.name);
+    const garbleChars = '▓▒░█<>/\\#01';
+    const start = performance.now();
+    const duration = 620 + Math.random() * 220;
+
+    function frame(now) {
+      const p = Math.min(1, (now - start) / duration);
+      if (p < 1) {
+        // 随机乱码 + 随机动作名，p 越大跳动越慢（有减速感）
+        let g = '';
+        for (let i = 0; i < 12; i++) g += garbleChars[Math.floor(Math.random() * garbleChars.length)];
+        const rndName = names[Math.floor(Math.random() * names.length)];
+        el.textContent = '[SCANNING] ' + g + '  ' + rndName + '  ' + g;
+        screenEl.scrollTop = screenEl.scrollHeight;
+        setTimeout(() => requestAnimationFrame(frame), 14 + p * p * 115);
+      } else {
+        // 锁定：整行高亮闪烁
+        el.className = 'line locked flash';
+        el.innerHTML = '[LOCKED] <span class="brk">&gt;&gt;&gt;</span> ' + ex.name +
+          ' <span class="brk">&lt;&lt;&lt;</span>  <span class="meta">' +
+          ex.sets + ' 组 × ' + fmtReps(ex.reps) +
+          '  |  休息 ' + ex.rest + 's  |  难度 ' + '★'.repeat(ex.diff) +
+          '  |  ' + ex.muscle + ' / ' + ex.equip + '</span>';
+        screenEl.scrollTop = screenEl.scrollHeight;
+        setTimeout(() => el.classList.remove('flash'), 600);
+        resolve();
+      }
+    }
+    requestAnimationFrame(frame);
+  });
+}
+
+// 执行抽签（单抽或批量）
+async function doDraw() {
+  if (drawing) return;
+  const pool = poolOf(currentFilter);
+  if (pool.length === 0) {
+    log('ERROR: 当前筛选下没有可选动作', 'err');
+    return;
+  }
+
+  drawing = true;
+  drawBtn.disabled = true;
+  setStatus('SCANNING');
+
+  const target = Math.min(drawCount, pool.length);
+  log('> 执行抽签 × ' + target + '  ·  肌群：' + currentFilter, 'cmd');
+  const picked = pickExercises(target);
+
+  // 逐个扫描锁定，模拟终端"锁定目标"
+  for (const ex of picked) {
+    await scanLine(ex);
+    history.push({ id: ex.id, name: ex.name, muscle: ex.muscle, ts: Date.now() });
+    saveHistory();
+    updateHistoryUI();
+  }
+
+  log('[ OK ] 训练单生成完毕 · 共 ' + picked.length + ' 个动作', 'ok');
+  log('', 'dim');
+
+  drawing = false;
+  drawBtn.disabled = false;
+  setStatus('READY');
+}
+
+drawBtn.addEventListener('click', doDraw);
+
+/* =========================================================
+   7. 休息计时器（ASCII 进度条）
+   ========================================================= */
+const timerEl = document.getElementById('timerDisplay');
+const toggleEl = document.getElementById('timerToggle');
+const resetEl = document.getElementById('timerReset');
+const presetsEl = document.getElementById('timerPresets');
+
+const BAR_CELLS = 24;
+let timerTotal = 0;      // 本轮总秒数
+let timerLeft = 0;       // 剩余秒数
+let timerRunning = false;
+let timerEndAt = 0;      // 结束时间戳
+let timerInterval = null;
+
+// 画进度条
+function renderTimer() {
+  let bar, text;
+  if (timerTotal === 0) {
+    bar = '░'.repeat(BAR_CELLS);
+    text = '--';
+  } else {
+    const filled = Math.max(0, Math.min(BAR_CELLS, Math.round(timerLeft / timerTotal * BAR_CELLS)));
+    bar = '█'.repeat(filled) + '░'.repeat(BAR_CELLS - filled);
+    text = String(timerLeft).padStart(2, '0') + 's';
+    if (timerRunning) text += '  RUNNING';
+    else if (timerLeft > 0) text += '  PAUSED';
+    else text = 'TIME UP';
+  }
+  timerEl.textContent = '[' + bar + '] ' + text;
+}
+
+function stopTimerTicker() {
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = null;
+}
+
+function timerTick() {
+  const left = Math.max(0, Math.ceil((timerEndAt - Date.now()) / 1000));
+  timerLeft = left;
+  renderTimer();
+
+  if (left <= 0) {
+    stopTimerTicker();
+    timerRunning = false;
+    toggleEl.textContent = '暂停';
+    timerEl.classList.add('alarm');
+    setTimeout(() => timerEl.classList.remove('alarm'), 3200);
+    log('[ TIME UP ] 休息结束，开始下一组。', 'warn');
+    setStatus('READY');
+  }
+}
+
+// 启动 / 继续
+function startTimer() {
+  if (timerLeft <= 0) return;
+  timerRunning = true;
+  timerEndAt = Date.now() + timerLeft * 1000;
+  stopTimerTicker();
+  timerInterval = setInterval(timerTick, 120);
+  toggleEl.textContent = '暂停';
+  setStatus('TIMER');
+  renderTimer();
+}
+
+// 暂停
+function pauseTimer() {
+  if (!timerRunning) return;
+  timerLeft = Math.max(0, Math.ceil((timerEndAt - Date.now()) / 1000));
+  timerRunning = false;
+  stopTimerTicker();
+  toggleEl.textContent = '继续';
+  setStatus('PAUSED');
+  renderTimer();
+}
+
+// 设置预设时长（点击即开始）
+function setTimerPreset(sec) {
+  stopTimerTicker();
+  timerRunning = false;
+  timerTotal = sec;
+  timerLeft = sec;
+  timerEl.classList.remove('alarm');
+  toggleEl.textContent = '暂停';
+  startTimer();
+}
+
+[30, 45, 60, 90].forEach(sec => {
+  const b = document.createElement('button');
+  b.textContent = sec + 's';
+  b.addEventListener('click', () => setTimerPreset(sec));
+  presetsEl.appendChild(b);
+});
+
+toggleEl.addEventListener('click', () => {
+  if (timerRunning) pauseTimer();
+  else startTimer();
+});
+
+resetEl.addEventListener('click', () => {
+  stopTimerTicker();
+  timerRunning = false;
+  timerTotal = 0;
+  timerLeft = 0;
+  timerEl.classList.remove('alarm');
+  toggleEl.textContent = '暂停';
+  setStatus('READY');
+  renderTimer();
+});
+
+renderTimer();
+
+/* =========================================================
+   8. 历史记录与防重复展示
+   ========================================================= */
+const histCountEl = document.getElementById('histCount');
+const histListEl = document.getElementById('histList');
+const histToggleBtn = document.getElementById('histToggle');
+
+function updateHistoryUI() {
+  histCountEl.textContent = '已抽 ' + history.length + ' 次';
+
+  if (!history.length) {
+    histListEl.innerHTML = '<div style="opacity:.6">暂无记录</div>';
+    return;
+  }
+  // 只展示最近 20 条，倒序
+  histListEl.innerHTML = history.slice(-20).reverse().map(h => {
+    const d = new Date(h.ts);
+    const time = d.toLocaleString('zh-CN', { hour12: false });
+    return '<div class="row"><span>' + h.name + '</span><span>' + h.muscle + ' · ' + time + '</span></div>';
+  }).join('');
+}
+
+histToggleBtn.addEventListener('click', () => {
+  const shown = histListEl.classList.toggle('show');
+  histToggleBtn.classList.toggle('active', shown);
+  histToggleBtn.textContent = shown ? '收起记录' : '查看记录';
+});
+
+document.getElementById('histClear').addEventListener('click', () => {
+  if (drawing) return;
+  history = [];
+  saveHistory();
+  updateHistoryUI();
+  log('> 历史记录已清空，防重复限制重置。', 'warn');
+});
+
+updateHistoryUI();
+</script>
+</body>
+</html>
